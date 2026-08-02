@@ -1,0 +1,13 @@
+{
+  "feishu_webhook_url": "https://open.feishu.cn/open-apis/bot/v2/hook/YOUR_WEBHOOK_ID_HERE",
+  "blackrock": {
+    "url": "https://www.blackrock.com/cn/global-weekly-commentary",
+    "name": "贝莱德每周投资评论"
+  },
+  "hsbc": {
+    "url": "https://www.hsbc.com.cn/content/hsbc/cn/zh_cn/wealth/insights.html/",
+    "name": "汇丰最新市场动态"
+  },
+  "check_interval_hours": 24,
+  "request_timeout_seconds": 30
+}
