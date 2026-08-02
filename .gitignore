@@ -1,0 +1,23 @@
+# Sensitive - contains real Feishu webhook URL
+config.json
+
+# Runtime state - tracks already-pushed articles
+seen.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual env
+venv/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
