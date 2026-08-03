@@ -8,6 +8,10 @@
     "url": "https://www.hsbc.com.cn/content/hsbc/cn/zh_cn/wealth/insights.html/",
     "name": "汇丰最新市场动态"
   },
+  "jpmorgan": {
+    "url": "https://www.jpmorgan.com/wealth-management/wealth-partners/insights",
+    "name": "摩根大通财富洞察"
+  },
   "check_interval_hours": 24,
   "request_timeout_seconds": 30
 }
