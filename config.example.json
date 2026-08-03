@@ -12,6 +12,10 @@
     "url": "https://www.jpmorgan.com/wealth-management/wealth-partners/insights",
     "name": "摩根大通财富洞察"
   },
+  "goldmansachs": {
+    "url": "https://www.goldmansachs.com/insights",
+    "name": "高盛洞察"
+  },
   "check_interval_hours": 24,
   "request_timeout_seconds": 30
 }
