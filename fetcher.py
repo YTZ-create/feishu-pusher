@@ -19,6 +19,13 @@ from pathlib import Path
 import requests
 from bs4 import BeautifulSoup
 
+# Fix Windows console encoding for emoji output
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 # ============================================================
 # Configuration
 # ============================================================
@@ -96,6 +103,58 @@ def translate_en_to_zh(text):
     # On failure, return original text
     _translation_cache[cache_key] = text
     return text
+
+
+# ============================================================
+# Article classification
+# ============================================================
+
+# Keywords for personalized content matching (case-insensitive)
+_PERSONALIZED_KEYWORDS = [
+    # Tech / 科技
+    "科技", "人工智能", "芯片", "半导体", "软件", "数字化", "机器人", "算法", "量子",
+    "云端", "区块链", "自动驾驶", "机器学习", "深度学习", "大模型", "自动化", "创新",
+    "科技股", "互联网", "数据", "ai",
+    "tech", "artificial intelligence", "chip", "semiconductor", "software", "deepseek",
+    "digital", "robot", "algorithm", "quantum", "cloud", "blockchain", "autonomous",
+    "machine learning", "deep learning", "nvidia", "chatgpt", "gpt", "llm",
+    "innovation", "technology", "silicon valley", "startup",
+    # Brokerage / 券商
+    "券商", "证券", "投行", "交易", "经纪", "做市", "承销", "资管", "理财", "基金",
+    "etf", "ipo", "上市", "股市", "股票", "交易所", "资本", "并购", "m&a",
+    "broker", "brokerage", "securities", "investment banking", "trading",
+    "market maker", "underwriting", "asset management", "fund", "wealth management",
+    "exchange", "stock exchange", "merger", "acquisition",
+    # Gold / 黄金
+    "黄金", "金价", "贵金属", "白银", "避险", "金矿",
+    "gold", "precious metal", "silver", "bullion", "safe haven",
+    # Petrochemical / 石油化工
+    "石油", "原油", "化工", "能源", "天然气", "煤", "稀土", "锂", "铜", "铝", "钢",
+    "大宗商品", "资源", "opec", "开采", "矿业", "油价", "矿产",
+    "oil", "crude", "petrochemical", "energy", "gas", "coal", "rare earth",
+    "lithium", "copper", "aluminum", "steel", "commodity", "resource", "miner",
+    # HK Stocks / 港股
+    "港股", "香港", "恒生", "h股", "港交所", "中概", "离岸", "沪深港通",
+    "hong kong", "hk", "hang seng", "h-share", "hkex", "offshore",
+]
+
+
+def classify_article(title, summary, translated_title, translated_summary):
+    """Classify article as 'personalized' or 'general' based on keyword matching.
+
+    Matches against both original text and Chinese translation, case-insensitive.
+    """
+    # Combine all text for matching (lowercase)
+    combined = f"{title} {summary} {translated_title} {translated_summary}".lower()
+
+    for kw in _PERSONALIZED_KEYWORDS:
+        if kw in combined:
+            # Avoid false positives: "gold" matching "goldman"
+            if kw == "gold" and "goldman" in combined:
+                continue
+            return "personalized"
+
+    return "general"
 
 
 # ============================================================
@@ -549,6 +608,91 @@ def send_to_feishu(webhook_url, article, is_new=True):
         return False
 
 
+def send_batch_card(webhook_url, articles, template_color, card_title, count_label):
+    """Send multiple articles as a single Feishu batch card.
+
+    Args:
+        webhook_url: Feishu webhook URL.
+        articles: List of article dicts (must have translated title in 'display_title').
+        template_color: Card header color (e.g. 'orange', 'blue').
+        card_title: Card header title text.
+        count_label: Label for the count line (e.g. '今日共 5 篇个性化相关内容').
+    """
+    if not articles:
+        return True  # Nothing to send
+
+    n = len(articles)
+    print(f"  [BatchCard] Building '{card_title}' with {n} article(s)...")
+
+    elements = []
+
+    # Summary line
+    elements.append({
+        "tag": "div",
+        "text": {
+            "tag": "lark_md",
+            "content": f"{count_label}：\n\n---"
+        }
+    })
+
+    # Article entries: group every 10 articles into one div to stay under 2000-char limit
+    chunk_size = 10
+    for chunk_start in range(0, n, chunk_size):
+        chunk = articles[chunk_start:chunk_start + chunk_size]
+        lines = []
+        for i, art in enumerate(chunk):
+            display_title = art.get("display_title", art["title"])
+            url = art["url"]
+            source = art["source"]
+            date_str = art.get("date", "")
+            lines.append(f"**[{display_title}]({url})**\n📰 {source}  📅 {date_str}")
+
+        content = "\n\n---\n\n".join(lines)
+        elements.append({
+            "tag": "div",
+            "text": {"tag": "lark_md", "content": content}
+        })
+
+    # Footer note
+    elements.append({
+        "tag": "note",
+        "elements": [
+            {
+                "tag": "plain_text",
+                "content": f"推送时间: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+            }
+        ]
+    })
+
+    card = {
+        "msg_type": "interactive",
+        "card": {
+            "header": {
+                "title": {
+                    "tag": "plain_text",
+                    "content": card_title
+                },
+                "template": template_color
+            },
+            "elements": elements
+        }
+    }
+
+    try:
+        resp = requests.post(webhook_url, json=card, timeout=15)
+        resp.raise_for_status()
+        result = resp.json()
+        if result.get("code") == 0:
+            print(f"  [Feishu] Batch card sent OK: '{card_title}' ({n} articles)")
+            return True
+        else:
+            print(f"  [Feishu] Batch card API Error: {result}")
+            return False
+    except Exception as e:
+        print(f"  [Feishu] Batch card send failed: {e}")
+        return False
+
+
 # ============================================================
 # Main
 # ============================================================
@@ -663,14 +807,55 @@ def main():
                 "first_seen": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             }
 
-    # ---- Send to Feishu ----
+    # ---- Classify & translate new articles ----
+    personalized = []
+    general = []
+    for art in new_articles:
+        # Translate title and summary for display + classification
+        display_title = translate_en_to_zh(art["title"])
+        display_summary = translate_en_to_zh(art.get("summary", "")) if art.get("summary") else ""
+        art["display_title"] = display_title
+        art["display_summary"] = display_summary
+
+        category = classify_article(
+            art["title"], art.get("summary", ""),
+            display_title, display_summary,
+        )
+        if category == "personalized":
+            personalized.append(art)
+            print(f"  [Classify] PERSONALIZED: {display_title[:50]}")
+        else:
+            general.append(art)
+            print(f"  [Classify] GENERAL:     {display_title[:50]}")
+
+    # ---- Send batch cards to Feishu ----
     if new_articles:
+        today_str = datetime.now().strftime("%m月%d日")
         print(f"\n{'='*60}")
-        print(f"Sending {len(new_articles)} new article(s) to Feishu...")
+        print(f"Sending {len(new_articles)} new article(s) as batch cards...")
         print(f"{'='*60}")
-        for art in new_articles:
-            send_to_feishu(webhook_url, art, is_new=True)
-            time.sleep(1)  # Rate limiting
+
+        # Personalized card
+        if personalized:
+            send_batch_card(
+                webhook_url,
+                personalized,
+                template_color="orange",
+                card_title=f"🧩 个性化内容 | 科技·券商·黄金·石油化工·港股 — {today_str}",
+                count_label=f"今日共 {len(personalized)} 篇个性化相关内容",
+            )
+            time.sleep(1)
+
+        # General card
+        if general:
+            send_batch_card(
+                webhook_url,
+                general,
+                template_color="blue",
+                card_title=f"📋 综合内容 — {today_str}",
+                count_label=f"今日共 {len(general)} 篇其他内容",
+            )
+            time.sleep(1)
     else:
         print("\nNo new articles to send.")
 
