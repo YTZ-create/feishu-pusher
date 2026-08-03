@@ -1,6 +1,6 @@
 # 投资评论自动推送
 
-自动抓取 BlackRock、HSBC、J.P. Morgan 和 Goldman Sachs 的投资评论，通过飞书群机器人推送到群聊。
+自动抓取 BlackRock、HSBC、J.P. Morgan 和 Goldman Sachs 的投资评论，智能分类为「个性化」和「综合」两张批量卡片，通过飞书群机器人推送到群聊。
 
 ## 数据源
 
@@ -46,8 +46,10 @@ powershell -ExecutionPolicy Bypass -File setup_task.ps1
 
 - **BlackRock**: HTTP 请求 + BeautifulSoup 解析 HTML meta 标签
 - **HSBC / J.P. Morgan / Goldman Sachs**: Playwright 无头 Chromium 渲染 SPA 页面后提取内容
+- **中英翻译**: 通过 MyMemory 免费 API 将英文标题/摘要译为中文，中文内容自动跳过
+- **智能分类**: 关键词匹配将文章分为「个性化」（科技/券商/黄金/石油化工/港股）和「综合」两类
 - **去重**: 基于 MD5(source:title:date) 的 `seen.json` 记录已推送文章
-- **推送**: 飞书互动消息卡片（有新文章蓝色卡片，无新文章灰色每日汇总）
+- **推送**: 每日最多 3 张飞书卡片 — 个性化内容卡（橙色）+ 综合内容卡（蓝色）+ 每日汇总（绿色/灰色）
 
 ## 文件说明
 
