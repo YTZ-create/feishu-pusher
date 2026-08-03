@@ -3,6 +3,8 @@
 投资评论自动抓取 + 飞书推送脚本
 - BlackRock 每周投资评论: requests + BeautifulSoup
 - HSBC 最新市场动态: Playwright headless browser
+- J.P. Morgan 财富洞察: Playwright headless browser
+- Goldman Sachs Insights: Playwright headless browser
 """
 
 import json
@@ -336,6 +338,90 @@ def fetch_jpmorgan(config):
 
 
 # ============================================================
+# Goldman Sachs fetcher (Playwright)
+# ============================================================
+
+def fetch_goldmansachs(config):
+    """Fetch Goldman Sachs Insights using Playwright."""
+    url = config["goldmansachs"]["url"]
+    name = config["goldmansachs"]["name"]
+    timeout = config.get("request_timeout_seconds", 30) * 1000  # ms
+
+    print(f"[GS] Launching headless browser for {url} ...")
+
+    from playwright.sync_api import sync_playwright
+
+    articles = []
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
+        page.set_default_timeout(timeout)
+
+        try:
+            page.goto(url, wait_until="domcontentloaded")
+            # Wait for JS content to render
+            page.wait_for_timeout(7000)
+
+            html = page.content()
+        finally:
+            browser.close()
+
+    soup = BeautifulSoup(html, "lxml")
+
+    # Find the article grid container
+    container = soup.find(class_=lambda c: c and "tout-card-grid-article-container" in c)
+    if not container:
+        print("[GS] WARNING: Could not find article grid container!")
+        return []
+
+    # Find all article cards (links with /insights/ in href)
+    cards = container.find_all("a", href=re.compile(r"/insights/"))
+
+    for card in cards:
+        href = card.get("href", "")
+        full_url = "https://www.goldmansachs.com" + href if href.startswith("/") else href
+
+        # Extract category (eyebrow)
+        eyebrow = card.find("h3", class_="gs-card-eyebrow")
+        category = eyebrow.get_text(strip=True) if eyebrow else ""
+
+        # Extract title
+        title_el = card.find("h4", class_="gs-card-title")
+        title = title_el.get_text(strip=True) if title_el else ""
+        if not title or len(title) < 5:
+            continue
+
+        # Extract date from card-meta area
+        # The date is the span with pattern "Mon DD, YYYY" inside card-meta
+        date_str = ""
+        meta = card.find(class_=lambda c: c and "card-meta" in c)
+        if meta:
+            date_spans = meta.find_all("span", class_=lambda c: c and "text-root" in str(c))
+            for span in reversed(date_spans):
+                text = span.get_text(strip=True)
+                if re.search(r"\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2},\s+\d{4}\b", text):
+                    date_str = text
+                    break
+
+        # Build summary from category
+        summary = category if category else ""
+
+        articles.append({
+            "title": title,
+            "date": date_str,
+            "summary": summary,
+            "url": full_url,
+            "source": name,
+        })
+        print(f"  [GS] [{category}] {title[:60]} -> {date_str}")
+
+    print(f"[GS] Extracted {len(articles)} articles")
+
+    return articles
+
+
+# ============================================================
 # Feishu webhook sender
 # ============================================================
 
@@ -432,7 +518,7 @@ def send_daily_summary(webhook_url, new_count, total_seen):
             "header": {
                 "title": {
                     "tag": "plain_text",
-                    "content": f"投资评论每日巡检 — {datetime.now().strftime('%m月%d日')}"
+                    "content": f"投资评论每日推送 — {datetime.now().strftime('%m月%d日')}"
                 },
                 "template": "green" if new_count > 0 else "grey"
             },
@@ -449,7 +535,7 @@ def send_daily_summary(webhook_url, new_count, total_seen):
                     "elements": [
                         {
                             "tag": "plain_text",
-                            "content": f"检查时间: {datetime.now().strftime('%Y-%m-%d %H:%M')} | 来源: 贝莱德/汇丰/摩根大通"
+                            "content": f"检查时间: {datetime.now().strftime('%Y-%m-%d %H:%M')} | 来源: 贝莱德/汇丰/摩根大通/高盛"
                         }
                     ]
                 }
@@ -508,8 +594,15 @@ def main():
         print(f"[JPM] ERROR: {e}")
         jpm_articles = []
 
+    # ---- Goldman Sachs ----
+    try:
+        gs_articles = fetch_goldmansachs(config)
+    except Exception as e:
+        print(f"[GS] ERROR: {e}")
+        gs_articles = []
+
     # ---- Dedup ----
-    all_articles = br_articles + hsbc_articles + jpm_articles
+    all_articles = br_articles + hsbc_articles + jpm_articles + gs_articles
     new_articles = []
     for art in all_articles:
         key = article_key(art["source"], art["title"], art.get("date", ""))
