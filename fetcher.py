@@ -266,6 +266,76 @@ def _extract_all_hsbc_articles(html, name):
 
 
 # ============================================================
+# J.P. Morgan fetcher (Playwright)
+# ============================================================
+
+def fetch_jpmorgan(config):
+    """Fetch J.P. Morgan Wealth Management insights using Playwright."""
+    url = config["jpmorgan"]["url"]
+    name = config["jpmorgan"]["name"]
+    timeout = config.get("request_timeout_seconds", 30) * 1000  # ms
+
+    print(f"[JPM] Launching headless browser for {url} ...")
+
+    from playwright.sync_api import sync_playwright
+
+    articles = []
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
+        page.set_default_timeout(timeout)
+
+        try:
+            page.goto(url, wait_until="domcontentloaded")
+            # Wait for JS content to render
+            page.wait_for_timeout(7000)
+
+            html = page.content()
+        finally:
+            browser.close()
+
+    soup = BeautifulSoup(html, "lxml")
+
+    # JPM articles are in li.jpma-article-card elements
+    cards = soup.find_all("li", class_="jpma-article-card")
+
+    for card in cards:
+        # Extract link and title
+        link = card.find("a", href=re.compile(r"/insights/"))
+        if not link:
+            continue
+
+        href = link.get("href", "")
+        full_url = "https://www.jpmorgan.com" + href if href.startswith("/") else href
+
+        title = link.get_text(strip=True)
+        if not title or len(title) < 5:
+            continue
+
+        # Extract date (in dynamic-grid__date)
+        date_el = card.find(class_="dynamic-grid__date")
+        date_str = date_el.get_text(strip=True) if date_el else ""
+
+        # Extract summary (in dynamic-grid__desc)
+        desc_el = card.find(class_="dynamic-grid__desc")
+        summary = desc_el.get_text(strip=True) if desc_el else ""
+
+        articles.append({
+            "title": title,
+            "date": date_str,
+            "summary": summary,
+            "url": full_url,
+            "source": name,
+        })
+        print(f"  [JPM] {title[:60]} -> {date_str}")
+
+    print(f"[JPM] Extracted {len(articles)} articles")
+
+    return articles
+
+
+# ============================================================
 # Feishu webhook sender
 # ============================================================
 
@@ -379,7 +449,7 @@ def send_daily_summary(webhook_url, new_count, total_seen):
                     "elements": [
                         {
                             "tag": "plain_text",
-                            "content": f"检查时间: {datetime.now().strftime('%Y-%m-%d %H:%M')} | 来源: 贝莱德/汇丰"
+                            "content": f"检查时间: {datetime.now().strftime('%Y-%m-%d %H:%M')} | 来源: 贝莱德/汇丰/摩根大通"
                         }
                     ]
                 }
@@ -431,8 +501,15 @@ def main():
         print(f"[HSBC] ERROR: {e}")
         hsbc_articles = []
 
+    # ---- J.P. Morgan ----
+    try:
+        jpm_articles = fetch_jpmorgan(config)
+    except Exception as e:
+        print(f"[JPM] ERROR: {e}")
+        jpm_articles = []
+
     # ---- Dedup ----
-    all_articles = br_articles + hsbc_articles
+    all_articles = br_articles + hsbc_articles + jpm_articles
     new_articles = []
     for art in all_articles:
         key = article_key(art["source"], art["title"], art.get("date", ""))
