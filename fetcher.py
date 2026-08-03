@@ -110,51 +110,140 @@ def translate_en_to_zh(text):
 # ============================================================
 
 # Keywords for personalized content matching (case-insensitive)
-_PERSONALIZED_KEYWORDS = [
-    # Tech / 科技
-    "科技", "人工智能", "芯片", "半导体", "软件", "数字化", "机器人", "算法", "量子",
-    "云端", "区块链", "自动驾驶", "机器学习", "深度学习", "大模型", "自动化", "创新",
-    "科技股", "互联网", "数据", "ai",
-    "tech", "artificial intelligence", "chip", "semiconductor", "software", "deepseek",
-    "digital", "robot", "algorithm", "quantum", "cloud", "blockchain", "autonomous",
-    "machine learning", "deep learning", "nvidia", "chatgpt", "gpt", "llm",
-    "innovation", "technology", "silicon valley", "startup",
-    # Brokerage / 券商
-    "券商", "证券", "投行", "交易", "经纪", "做市", "承销", "资管", "理财", "基金",
-    "etf", "ipo", "上市", "股市", "股票", "交易所", "资本", "并购", "m&a",
-    "broker", "brokerage", "securities", "investment banking", "trading",
-    "market maker", "underwriting", "asset management", "fund", "wealth management",
-    "exchange", "stock exchange", "merger", "acquisition",
-    # Gold / 黄金
-    "黄金", "金价", "贵金属", "白银", "避险", "金矿",
-    "gold", "precious metal", "silver", "bullion", "safe haven",
-    # Petrochemical / 石油化工
-    "石油", "原油", "化工", "能源", "天然气", "煤", "稀土", "锂", "铜", "铝", "钢",
-    "大宗商品", "资源", "opec", "开采", "矿业", "油价", "矿产",
-    "oil", "crude", "petrochemical", "energy", "gas", "coal", "rare earth",
-    "lithium", "copper", "aluminum", "steel", "commodity", "resource", "miner",
-    # HK Stocks / 港股
-    "港股", "香港", "恒生", "h股", "港交所", "中概", "离岸", "沪深港通",
-    "hong kong", "hk", "hang seng", "h-share", "hkex", "offshore",
-]
+_SUBCATEGORY_KEYWORDS = {
+    "tech": [
+        # 科技 / Tech
+        "科技", "人工智能", "芯片", "半导体", "软件", "数字化", "机器人", "算法", "量子",
+        "云端", "区块链", "自动驾驶", "机器学习", "深度学习", "大模型", "自动化", "创新",
+        "科技股", "互联网", "数据", "ai",
+        "tech", "artificial intelligence", "chip", "semiconductor", "software", "deepseek",
+        "digital", "robot", "algorithm", "quantum", "cloud", "blockchain", "autonomous",
+        "machine learning", "deep learning", "nvidia", "chatgpt", "gpt", "llm",
+        "innovation", "technology", "silicon valley", "startup",
+    ],
+    "brokerage": [
+        # 券商 / Brokerage
+        "券商", "证券", "投行", "交易", "经纪", "做市", "承销", "资管", "理财", "基金",
+        "etf", "ipo", "上市", "股市", "股票", "交易所", "资本", "并购", "m&a",
+        "broker", "brokerage", "securities", "investment banking", "trading",
+        "market maker", "underwriting", "asset management", "fund", "wealth management",
+        "exchange", "stock exchange", "merger", "acquisition",
+    ],
+    "gold": [
+        # 黄金 / Gold
+        "黄金", "金价", "贵金属", "白银", "避险", "金矿",
+        "gold", "precious metal", "silver", "bullion", "safe haven",
+    ],
+    "petrochem": [
+        # 石油化工 / Petrochemical
+        "石油", "原油", "化工", "能源", "天然气", "煤", "稀土", "锂", "铜", "铝", "钢",
+        "大宗商品", "资源", "opec", "开采", "矿业", "油价", "矿产",
+        "oil", "crude", "petrochemical", "energy", "gas", "coal", "rare earth",
+        "lithium", "copper", "aluminum", "steel", "commodity", "resource", "miner",
+    ],
+    "hkstock": [
+        # 港股 / HK Stocks
+        "港股", "香港", "恒生", "h股", "港交所", "中概", "离岸", "沪深港通",
+        "hong kong", "hk", "hang seng", "h-share", "hkex", "offshore",
+    ],
+}
+
+_SUBCATEGORY_NAMES = {
+    "tech": "科技",
+    "brokerage": "券商",
+    "gold": "黄金",
+    "petrochem": "石油化工",
+    "hkstock": "港股",
+}
 
 
 def classify_article(title, summary, translated_title, translated_summary):
-    """Classify article as 'personalized' or 'general' based on keyword matching.
+    """Classify article into a sub-category or 'general'.
 
+    Returns sub-category key (e.g. 'tech', 'gold') or 'general' for non-matching articles.
     Matches against both original text and Chinese translation, case-insensitive.
     """
     # Combine all text for matching (lowercase)
     combined = f"{title} {summary} {translated_title} {translated_summary}".lower()
 
-    for kw in _PERSONALIZED_KEYWORDS:
-        if kw in combined:
+    # Short keywords that need word-boundary matching to avoid false positives
+    # (e.g. "ai" must not match inside "chairman")
+    _WORD_BOUNDARY_KW = {"ai", "hk", "oil", "gas", "coal"}
+
+    for sub_key in ["tech", "brokerage", "gold", "petrochem", "hkstock"]:
+        for kw in _SUBCATEGORY_KEYWORDS[sub_key]:
+            if kw in _WORD_BOUNDARY_KW:
+                # Use word-boundary regex: keyword must be a standalone word
+                if not re.search(rf"\b{re.escape(kw)}\b", combined):
+                    continue
+            elif kw in combined:
+                pass  # standard substring match
+            else:
+                continue
+
             # Avoid false positives: "gold" matching "goldman"
             if kw == "gold" and "goldman" in combined:
                 continue
-            return "personalized"
+            return sub_key
 
     return "general"
+
+
+# ============================================================
+# DeepSeek summary generation
+# ============================================================
+
+def generate_summary_deepseek(api_key, category_name, titles):
+    """Generate a one-sentence Chinese summary for a category using DeepSeek API.
+
+    Args:
+        api_key: DeepSeek API key.
+        category_name: Chinese category name (e.g. '科技').
+        titles: List of translated Chinese article titles.
+
+    Returns:
+        A one-sentence summary string, or fallback template on failure.
+    """
+    if not titles:
+        return f"今日{category_name}领域暂无更新。"
+
+    n = len(titles)
+    titles_text = "\n".join(f"{i+1}. {t}" for i, t in enumerate(titles))
+
+    prompt = (
+        f"你是一个金融资讯编辑。以下是今天「{category_name}」领域的{n}篇文章标题，"
+        f"请用一句中文总结这些文章共同关注的焦点（不超过80字），只返回摘要文本，不要前缀：\n\n"
+        f"{titles_text}"
+    )
+
+    try:
+        resp = requests.post(
+            "https://api.deepseek.com/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": "deepseek-chat",
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": 120,
+                "temperature": 0.3,
+            },
+            timeout=15,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        summary = data["choices"][0]["message"]["content"].strip()
+        # Clean up quotes and prefixes that the model might add
+        summary = summary.strip('"''「」''\n')
+        if summary:
+            print(f"  [DeepSeek] {category_name} summary: {summary[:60]}...")
+            return summary
+    except Exception as e:
+        print(f"  [DeepSeek] Failed for {category_name}: {e}")
+
+    # Fallback
+    return f"今日{category_name}领域共{n}篇更新。"
 
 
 # ============================================================
@@ -608,53 +697,18 @@ def send_to_feishu(webhook_url, article, is_new=True):
         return False
 
 
-def send_batch_card(webhook_url, articles, template_color, card_title, count_label):
-    """Send multiple articles as a single Feishu batch card.
+def _make_article_line(art):
+    """Build a single article markdown link line for card display."""
+    display_title = art.get("display_title", art["title"])
+    url = art["url"]
+    source = art["source"]
+    date_str = art.get("date", "")
+    return f"**[{display_title}]({url})**\n来源：{source}  日期：{date_str}"
 
-    Args:
-        webhook_url: Feishu webhook URL.
-        articles: List of article dicts (must have translated title in 'display_title').
-        template_color: Card header color (e.g. 'orange', 'blue').
-        card_title: Card header title text.
-        count_label: Label for the count line (e.g. '今日共 5 篇个性化相关内容').
-    """
-    if not articles:
-        return True  # Nothing to send
 
-    n = len(articles)
-    print(f"  [BatchCard] Building '{card_title}' with {n} article(s)...")
-
-    elements = []
-
-    # Summary line
-    elements.append({
-        "tag": "div",
-        "text": {
-            "tag": "lark_md",
-            "content": f"{count_label}：\n\n---"
-        }
-    })
-
-    # Article entries: group every 10 articles into one div to stay under 2000-char limit
-    chunk_size = 10
-    for chunk_start in range(0, n, chunk_size):
-        chunk = articles[chunk_start:chunk_start + chunk_size]
-        lines = []
-        for i, art in enumerate(chunk):
-            display_title = art.get("display_title", art["title"])
-            url = art["url"]
-            source = art["source"]
-            date_str = art.get("date", "")
-            lines.append(f"**[{display_title}]({url})**\n📰 {source}  📅 {date_str}")
-
-        content = "\n\n---\n\n".join(lines)
-        elements.append({
-            "tag": "div",
-            "text": {"tag": "lark_md", "content": content}
-        })
-
-    # Footer note
-    elements.append({
+def _build_footer_note():
+    """Build the standard footer note element."""
+    return {
         "tag": "note",
         "elements": [
             {
@@ -662,16 +716,125 @@ def send_batch_card(webhook_url, articles, template_color, card_title, count_lab
                 "content": f"推送时间: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
             }
         ]
-    })
+    }
+
+
+def send_personalized_card(webhook_url, grouped_articles, api_key):
+    """Send the personalized card with sub-category sections and DeepSeek summaries.
+
+    Args:
+        webhook_url: Feishu webhook URL.
+        grouped_articles: Dict mapping sub-category key -> list of article dicts.
+        api_key: DeepSeek API key for generating summaries.
+    """
+    total = sum(len(v) for v in grouped_articles.values())
+    if total == 0:
+        return True
+
+    today_str = datetime.now().strftime("%m月%d日")
+    card_title = f"个性化内容 | 科技·券商·黄金·石油化工·港股 — {today_str}"
+    print(f"  [Personalized] Building card with {total} articles across {len(grouped_articles)} sub-categories...")
+
+    elements = []
+
+    # First sub-category: no leading hr
+    first = True
+    for sub_key in ["tech", "brokerage", "gold", "petrochem", "hkstock"]:
+        arts = grouped_articles.get(sub_key, [])
+        if not arts:
+            continue
+
+        cat_name = _SUBCATEGORY_NAMES[sub_key]
+        n = len(arts)
+
+        # Separator between sub-categories
+        if not first:
+            elements.append({"tag": "hr"})
+        first = False
+
+        # Generate DeepSeek summary
+        titles = [a.get("display_title", a["title"]) for a in arts]
+        summary = generate_summary_deepseek(api_key, cat_name, titles)
+
+        # Sub-category header + summary
+        elements.append({
+            "tag": "div",
+            "text": {
+                "tag": "lark_md",
+                "content": f"**【{cat_name}】（{n}篇）**\n{summary}"
+            }
+        })
+
+        # Article list for this sub-category
+        lines = [_make_article_line(a) for a in arts]
+        content = "\n\n".join(lines)
+        elements.append({
+            "tag": "div",
+            "text": {"tag": "lark_md", "content": content}
+        })
+
+    # Footer
+    elements.append(_build_footer_note())
 
     card = {
         "msg_type": "interactive",
         "card": {
             "header": {
-                "title": {
-                    "tag": "plain_text",
-                    "content": card_title
-                },
+                "title": {"tag": "plain_text", "content": card_title},
+                "template": "orange"
+            },
+            "elements": elements
+        }
+    }
+
+    try:
+        resp = requests.post(webhook_url, json=card, timeout=15)
+        resp.raise_for_status()
+        result = resp.json()
+        if result.get("code") == 0:
+            print(f"  [Feishu] Personalized card sent OK ({total} articles)")
+            return True
+        else:
+            print(f"  [Feishu] Personalized card API Error: {result}")
+            return False
+    except Exception as e:
+        print(f"  [Feishu] Personalized card send failed: {e}")
+        return False
+
+
+def send_batch_card(webhook_url, articles, template_color, card_title):
+    """Send a simple batch card for general (综合) articles.
+
+    Args:
+        webhook_url: Feishu webhook URL.
+        articles: List of article dicts.
+        template_color: Card header color.
+        card_title: Card header title text.
+    """
+    if not articles:
+        return True
+
+    n = len(articles)
+    print(f"  [BatchCard] Building '{card_title}' with {n} article(s)...")
+
+    elements = []
+
+    # Article list
+    lines = [_make_article_line(a) for a in articles]
+    content = "\n\n".join(lines)
+    elements.append({
+        "tag": "div",
+        "text": {"tag": "lark_md", "content": content}
+    })
+
+    # Footer
+    elements.append(_build_footer_note())
+
+    card = {
+        "msg_type": "interactive",
+        "card": {
+            "header": {
+                "title": {"tag": "plain_text", "content": card_title},
                 "template": template_color
             },
             "elements": elements
@@ -808,7 +971,7 @@ def main():
             }
 
     # ---- Classify & translate new articles ----
-    personalized = []
+    grouped = {"tech": [], "brokerage": [], "gold": [], "petrochem": [], "hkstock": []}
     general = []
     for art in new_articles:
         # Translate title and summary for display + classification
@@ -817,16 +980,16 @@ def main():
         art["display_title"] = display_title
         art["display_summary"] = display_summary
 
-        category = classify_article(
+        sub_key = classify_article(
             art["title"], art.get("summary", ""),
             display_title, display_summary,
         )
-        if category == "personalized":
-            personalized.append(art)
-            print(f"  [Classify] PERSONALIZED: {display_title[:50]}")
+        if sub_key in grouped:
+            grouped[sub_key].append(art)
+            print(f"  [Classify] {_SUBCATEGORY_NAMES[sub_key]}: {display_title[:50]}")
         else:
             general.append(art)
-            print(f"  [Classify] GENERAL:     {display_title[:50]}")
+            print(f"  [Classify] 综合:     {display_title[:50]}")
 
     # ---- Send batch cards to Feishu ----
     if new_articles:
@@ -835,15 +998,11 @@ def main():
         print(f"Sending {len(new_articles)} new article(s) as batch cards...")
         print(f"{'='*60}")
 
-        # Personalized card
-        if personalized:
-            send_batch_card(
-                webhook_url,
-                personalized,
-                template_color="orange",
-                card_title=f"🧩 个性化内容 | 科技·券商·黄金·石油化工·港股 — {today_str}",
-                count_label=f"今日共 {len(personalized)} 篇个性化相关内容",
-            )
+        # Personalized card (with sub-category sections + DeepSeek summaries)
+        personalized_total = sum(len(v) for v in grouped.values())
+        if personalized_total > 0:
+            ds_api_key = config.get("deepseek_api_key", "")
+            send_personalized_card(webhook_url, grouped, ds_api_key)
             time.sleep(1)
 
         # General card
@@ -852,8 +1011,7 @@ def main():
                 webhook_url,
                 general,
                 template_color="blue",
-                card_title=f"📋 综合内容 — {today_str}",
-                count_label=f"今日共 {len(general)} 篇其他内容",
+                card_title=f"综合内容 — {today_str}",
             )
             time.sleep(1)
     else:
