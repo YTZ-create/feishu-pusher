@@ -55,6 +55,50 @@ def article_key(source, title, date_str):
     return hashlib.md5(raw.encode("utf-8")).hexdigest()[:12]
 
 # ============================================================
+# Translation helper (MyMemory free API)
+# ============================================================
+
+# Simple in-memory translation cache to avoid hitting the API repeatedly
+_translation_cache = {}
+
+def translate_en_to_zh(text):
+    """Translate English text to Chinese using MyMemory free API.
+    Returns the translated text, or the original text on failure.
+    Text that already contains Chinese characters is returned as-is."""
+    if not text:
+        return text
+
+    # If text already contains Chinese characters, skip translation
+    if re.search(r'[一-鿿]', text):
+        return text
+
+    # Check cache
+    cache_key = text[:200]  # Use first 200 chars as key (titles are short)
+    if cache_key in _translation_cache:
+        return _translation_cache[cache_key]
+
+    try:
+        resp = requests.get(
+            "https://api.mymemory.translated.net/get",
+            params={"q": text, "langpair": "en|zh"},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        translated = data.get("responseData", {}).get("translatedText", "")
+        if translated and translated != text:
+            _translation_cache[cache_key] = translated
+            print(f"  [Translate] {text[:50]}... -> {translated[:50]}...")
+            return translated
+    except Exception as e:
+        print(f"  [Translate] Failed for '{text[:40]}...': {e}")
+
+    # On failure, return original text
+    _translation_cache[cache_key] = text
+    return text
+
+
+# ============================================================
 # BlackRock fetcher
 # ============================================================
 
@@ -433,9 +477,13 @@ def send_to_feishu(webhook_url, article, is_new=True):
     summary = article.get("summary", "")
     url = article["url"]
 
+    # Translate English titles/summaries to Chinese for display
+    display_title = translate_en_to_zh(title)
+    display_summary = translate_en_to_zh(summary) if summary else ""
+
     # Truncate summary for card display
-    if len(summary) > 300:
-        summary = summary[:300] + "..."
+    if len(display_summary) > 300:
+        display_summary = display_summary[:300] + "..."
 
     # Build Feishu interactive card
     card = {
@@ -444,7 +492,7 @@ def send_to_feishu(webhook_url, article, is_new=True):
             "header": {
                 "title": {
                     "tag": "plain_text",
-                    "content": f"{'🆕' if is_new else '📌'} [{source}] {title[:80]}"
+                    "content": f"{'🆕' if is_new else '📌'} [{source}] {display_title[:80]}"
                 },
                 "template": "blue"
             },
@@ -453,7 +501,7 @@ def send_to_feishu(webhook_url, article, is_new=True):
                     "tag": "div",
                     "text": {
                         "tag": "lark_md",
-                        "content": f"**日期**: {date_str}\n\n{summary}" if summary else f"**日期**: {date_str}"
+                        "content": f"**日期**: {date_str}\n\n{display_summary}" if display_summary else f"**日期**: {date_str}"
                     }
                 },
                 {
