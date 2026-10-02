@@ -12,6 +12,8 @@ Auto-fetch investment commentary from BlackRock / HSBC / J.P. Morgan / Goldman S
 
 </div>
 
+> 💡 **看不懂怎么用？** 别啃文档——把这个仓库（或这份 README）扔给你的 AI 助手，说一句「按这个帮我把飞书投资评论推送配好」，让它读完替你装依赖、填 Webhook、跑 `fetcher.py` 和定时任务就行。
+
 ---
 
 ## 目录
