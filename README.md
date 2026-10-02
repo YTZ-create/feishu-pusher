@@ -8,7 +8,7 @@ Auto-fetch investment commentary from BlackRock / HSBC / J.P. Morgan / Goldman S
 
 ![Language](https://img.shields.io/badge/language-Python-3776ab)
 ![Type](https://img.shields.io/badge/type-CLI%20脚本-blue)
-![License](https://img.shields.io/badge/license-未声明-lightgrey)
+![License](https://img.shields.io/badge/license-MIT-yellow)
 
 </div>
 
@@ -119,4 +119,4 @@ A：`setup_task.ps1` 需以**管理员身份**运行；计划任务设为每天�
 
 ## 许可证
 
-本仓库当前**未附许可证文件**（`LICENSE`）。如需明确授权条款，请联系作者（YTZ-create）补充。
+[MIT](LICENSE) © 2026 zhiyutong
